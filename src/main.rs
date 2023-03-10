@@ -1,9 +1,9 @@
 fn main() {
-    println!("The addition result is {}", add(2, 3));
+    println!("The subtraction result is {}", subtract(2, 3));
 }
 
-fn add(a: i32, b: i32) -> i32 {
-    a + b
+fn subtract(a: i32, b: i32) -> i32 {
+    a - b
 }
 
 #[cfg(test)]
@@ -12,7 +12,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_add() {
-        assert_eq!(add(1, 2), 3);
+    fn test_subtract() {
+        assert_eq!(subtract(1, 2), -1);
     }
 }
