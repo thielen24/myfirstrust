@@ -10,7 +10,7 @@ const WIDTH: usize = 28;
 
 const TRAIN_SIZE: usize = 10000;
 const VAL_SIZE: usize = 1000;
-const TEST_SIZE: usize =1000;
+const TEST_SIZE: usize = 1000;
 
 const N_EPOCHS: i64 = 50;
 const BATCH_SIZE: i64 = 256;
