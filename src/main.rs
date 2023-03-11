@@ -87,12 +87,7 @@ pub fn generate_random_index(array_size: i64, batch_size: i64)-> Tensor{
     random_idxs
 }
 
-// fn setup_train_and_test()->f32{
-
-// }
-
-fn main()-> Result<(), Box<dyn Error>> { 
-
+fn setup_train_and_test()-> Result<f64, Box<dyn Error>>{
     // Deconstruct the returned Mnist struct.
     let Mnist {
         trn_img,
@@ -108,7 +103,7 @@ fn main()-> Result<(), Box<dyn Error>> {
         .validation_set_length(VAL_SIZE as u32)
         .test_set_length(TEST_SIZE as u32)
         .finalize();
-    
+
     // set up a weight and bias tensor
     let train_data = image_to_tensor(trn_img, TRAIN_SIZE, HEIGHT, WIDTH);
     let train_lbl = labels_to_tensor(trn_lbl, TRAIN_SIZE, 1);
@@ -146,6 +141,11 @@ fn main()-> Result<(), Box<dyn Error>> {
     let test_accuracy = net.batch_accuracy_for_logits(&test_data, &test_lbl, vs.device(), 1024);
     println!("Final test accuracy {:5.2}%", 100.*test_accuracy);
 
+    Ok(100.*test_accuracy)
+}
+
+fn main() -> Result<(), Box<dyn Error>> { 
+    let _result = setup_train_and_test();
     Ok(())
 }
 
@@ -153,10 +153,12 @@ fn main()-> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
-    // use super::*;
+    use super::*;
+    use claim::assert_gt;
 
-    // #[test]
-    // fn test_subtract() {
-    //     assert_eq!(subtract(1, 2), -1);
-    // }
+    #[test]
+    fn test_setup_train_and_test() -> Result<(), Box<dyn Error>> {
+        assert_gt!(setup_train_and_test()?, 95.);
+        Ok(())
+    }
 }
