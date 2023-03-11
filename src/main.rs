@@ -1,18 +1,164 @@
-fn main() {
-    println!("The subtraction result is {}", subtract(2, 3));
+use std::result::Result;
+use std::error::Error;
+use mnist::*;
+use tch::{kind, Kind, Tensor, nn, nn::ModuleT, nn::OptimizerConfig, Device};
+use ndarray::{Array3, Array2};
+
+
+const HEIGHT: usize = 28; 
+const WIDTH: usize = 28;
+
+const TRAIN_SIZE: usize = 50000;
+const VAL_SIZE: usize = 10000;
+const TEST_SIZE: usize = 10000;
+
+const N_EPOCHS: i64 = 50;
+const BATCH_SIZE: i64 = 256;
+
+
+#[derive(Debug)]
+struct Net {
+    conv1: nn::Conv2D,
+    conv2: nn::Conv2D,
+    fc1: nn::Linear,
+    fc2: nn::Linear,
 }
 
-fn subtract(a: i32, b: i32) -> i32 {
-    a - b
+impl Net {
+    fn new(vs: &nn::Path) -> Net {
+        // stride -- padding -- dilation
+        let conv1 = nn::conv2d(vs, 1, 32, 5, Default::default());
+        let conv2 = nn::conv2d(vs, 32, 64, 5, Default::default());
+        let fc1 = nn::linear(vs, 1024, 1024, Default::default());
+        let fc2 = nn::linear(vs, 1024, 10, Default::default());
+        Net { conv1, conv2, fc1, fc2 }
+    }
 }
+
+// forward step
+impl nn::ModuleT for Net {
+    fn forward_t(&self, xs: &Tensor, train: bool) -> Tensor {
+        xs.view([-1, 1, 28, 28])
+            .apply(&self.conv1)
+            .max_pool2d_default(2)
+            .apply(&self.conv2)
+            .max_pool2d_default(2)
+            .view([-1, 1024])
+            .apply(&self.fc1)
+            .relu()
+            .dropout(0.75, train)
+            .apply(&self.fc2)
+    }
+}
+
+
+pub fn image_to_tensor(data:Vec<u8>, dim1:usize, dim2:usize, dim3:usize)-> Tensor{
+    // normalize the image as well 
+    let inp_data: Array3<f32> = Array3::from_shape_vec((dim1, dim2, dim3), data)
+        .expect("Error converting data to 3D array")
+        .map(|x| *x as f32/256.0);
+    // convert to tensor
+    let inp_tensor = Tensor::of_slice(inp_data.as_slice().unwrap());
+    // reshape so we'll have dim1, dim2*dim3 shape array
+    let ax1 = dim1 as i64; 
+    let ax2 = (dim2 as i64)*(dim3 as i64);
+    let shape: Vec<i64>  = vec![ ax1, ax2 ];
+    let output_data = inp_tensor.reshape(&shape);
+    println!("Output image tensor size {:?}", shape);
+        
+    output_data
+}
+
+
+pub fn labels_to_tensor(data:Vec<u8>, dim1:usize, dim2:usize)-> Tensor{
+    let inp_data: Array2<i64> = Array2::from_shape_vec((dim1, dim2), data)
+        .expect("Error converting data to 2D array")
+        .map(|x| *x as i64);
+
+    let output_data = Tensor::of_slice(inp_data.as_slice().unwrap());
+    println!("Output label tensor size {:?}", output_data.size());
+    
+    output_data
+}
+
+
+pub fn generate_random_index(array_size: i64, batch_size: i64)-> Tensor{
+    let random_idxs = Tensor::randint(array_size, &[batch_size], kind::INT64_CPU);
+    random_idxs
+}
+
+fn setup_train_and_test()-> Result<f64, Box<dyn Error>>{
+    // Deconstruct the returned Mnist struct.
+    let Mnist {
+        trn_img,
+        trn_lbl,
+        val_img, 
+        val_lbl,
+        tst_img,
+        tst_lbl,
+    } = MnistBuilder::new()
+        .download_and_extract()
+        .label_format_digit()
+        .training_set_length(TRAIN_SIZE as u32)
+        .validation_set_length(VAL_SIZE as u32)
+        .test_set_length(TEST_SIZE as u32)
+        .finalize();
+
+    // set up a weight and bias tensor
+    let train_data = image_to_tensor(trn_img, TRAIN_SIZE, HEIGHT, WIDTH);
+    let train_lbl = labels_to_tensor(trn_lbl, TRAIN_SIZE, 1);
+    let test_data = image_to_tensor(tst_img, TEST_SIZE, HEIGHT, WIDTH); 
+    let test_lbl = labels_to_tensor(tst_lbl, TEST_SIZE, 1);
+    let val_data = image_to_tensor(val_img, VAL_SIZE, HEIGHT, WIDTH);
+    let val_lbl = labels_to_tensor(val_lbl, VAL_SIZE, 1);
+
+    // set up variable store to check if cuda is available 
+    let vs = nn::VarStore::new(Device::cuda_if_available());
+    // set up the Conv net 
+    let net = Net::new(&vs.root());
+    // set up optimizer 
+    let mut opt = nn::Adam::default().build(&vs, 1e-4)?;
+    let n_it = (TRAIN_SIZE as i64)/BATCH_SIZE; // already ceiled
+    println!("Number of iteration with given batch size: {:?}", n_it);
+    // run epochs 
+    for epoch in 1..N_EPOCHS {
+        // generate random idxs for batch size 
+        // run all the images divided in batches  -> for loop
+        for _ in 1..n_it {
+            let batch_idxs = generate_random_index(TRAIN_SIZE as i64, BATCH_SIZE); 
+            let batch_images = train_data.index_select(0, &batch_idxs).to_device(vs.device()).to_kind(Kind::Float); 
+            let batch_lbls = train_lbl.index_select(0, &batch_idxs).to_device(vs.device()).to_kind(Kind::Int64);
+            // compute the loss 
+            let loss = net.forward_t(&batch_images, true).cross_entropy_for_logits(&batch_lbls);
+            opt.backward_step(&loss);
+        }
+        // compute accuracy 
+        let val_accuracy = net.batch_accuracy_for_logits(&val_data, &val_lbl, vs.device(), 1024);
+        println!("epoch: {:4} test acc: {:5.2}%", epoch, 100. * val_accuracy,);
+    }
+
+    // test accuracy 
+    let test_accuracy = net.batch_accuracy_for_logits(&test_data, &test_lbl, vs.device(), 1024);
+    println!("Final test accuracy {:5.2}%", 100.*test_accuracy);
+
+    Ok(100.*test_accuracy)
+}
+
+fn main() -> Result<(), Box<dyn Error>> { 
+    let _result = setup_train_and_test();
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+    use claim::assert_gt;
 
     #[test]
-    fn test_subtract() {
-        assert_eq!(subtract(1, 2), -1);
+    fn test_setup_train_and_test() -> Result<(), Box<dyn Error>> {
+        assert_gt!(setup_train_and_test()?, 95.);
+        Ok(())
     }
 }
