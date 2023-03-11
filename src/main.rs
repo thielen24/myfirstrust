@@ -8,9 +8,9 @@ use ndarray::{Array3, Array2};
 const HEIGHT: usize = 28; 
 const WIDTH: usize = 28;
 
-const TRAIN_SIZE: usize = 10000;
-const VAL_SIZE: usize = 1000;
-const TEST_SIZE: usize = 1000;
+const TRAIN_SIZE: usize = 50000;
+const VAL_SIZE: usize = 10000;
+const TEST_SIZE: usize = 10000;
 
 const N_EPOCHS: i64 = 50;
 const BATCH_SIZE: i64 = 256;
@@ -46,7 +46,7 @@ impl nn::ModuleT for Net {
             .view([-1, 1024])
             .apply(&self.fc1)
             .relu()
-            .dropout(0.5, train)
+            .dropout(0.75, train)
             .apply(&self.fc2)
     }
 }
